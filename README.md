@@ -1,10 +1,12 @@
-## Fork: Scittle/Babashka Compatibility
+## Fork: Scittle Compatibility
 
-This is a fork of [lucywang000/clj-statecharts](https://github.com/lucywang000/clj-statecharts) with changes to enable compatibility with [Scittle](https://github.com/babashka/scittle) and [Babashka](https://github.com/babashka/babashka).
+This is a fork of [lucywang000/clj-statecharts](https://github.com/lucywang000/clj-statecharts) with changes to enable compatibility with [Scittle](https://github.com/babashka/scittle) (SCI in the browser). The upstream v0.1.7 already works with [Babashka](https://github.com/babashka/babashka) as-is — these changes are only needed for Scittle.
 
-Changes from upstream:
-- Removed [malli](https://github.com/metosin/malli) dependency (the sole external dep and only blocker to standalone Scittle usage). Replaced with hand-written `normalize-machine` functions. All existing tests pass unchanged.
-- Fixed defrecord field access (`.-v` → `:v`) for SCI/Scittle compatibility.
+Changes from upstream (Scittle-specific):
+- Removed [malli](https://github.com/metosin/malli) dependency — no Scittle malli plugin exists, making it the sole blocker to standalone Scittle usage. Replaced with hand-written `normalize-machine` functions. (Malli works fine in Babashka; this change is only required for Scittle.)
+- Fixed defrecord field access (`.-v` → `:v`) — Scittle's SCI does not support `.-field` on defrecords. (Babashka's SCI handles `.-field` correctly; this fix is only required for Scittle but is harmless elsewhere since `:v` works across all Clojure dialects.)
+
+All existing tests pass unchanged on JVM Clojure, ClojureScript, Babashka, and Scittle (37 browser tests).
 
 ### Scittle Usage
 
