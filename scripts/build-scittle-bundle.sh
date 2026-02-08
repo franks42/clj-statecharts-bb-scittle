@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC="$PROJECT_ROOT/src/statecharts"
-OUTPUT="$PROJECT_ROOT/test-scittle/statecharts-bundle.cljc"
+OUTPUT="$PROJECT_ROOT/dist/statecharts-bundle.cljc"
 
 cat \
   "$SRC/utils.cljc" \
@@ -21,4 +21,4 @@ cat \
   "$SRC/core.cljc" \
   > "$OUTPUT"
 
-echo "Bundle written to test-scittle/statecharts-bundle.cljc ($(wc -l < "$OUTPUT") lines)"
+echo "Bundle written to dist/statecharts-bundle.cljc ($(wc -l < "$OUTPUT") lines)"
