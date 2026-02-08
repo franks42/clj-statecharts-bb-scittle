@@ -1,3 +1,236 @@
+(ns statecharts.utils)
+
+(defn ensure-vector [x]
+  (cond
+    (vector? x)
+    x
+
+    (nil? x)
+    []
+
+    :else
+    [x]))
+
+(defn ensure-event-map [x]
+  (if (map? x)
+    x
+    {:type x}))
+
+(defn map-kv [f m]
+  (->> m
+       (map (fn [[k v]]
+              (f k v)))
+       (into (empty m))))
+
+(defn map-vals [f m]
+  (->> m
+       (map (fn [[k v]]
+              [k (f v)]))
+       (into (empty m))))
+
+(defn map-kv-vals [f m]
+  (->> m
+       (map (fn [[k v]]
+              [k (f k v)]))
+       (into (empty m))))
+
+(defn remove-vals [pred m]
+  (->> m
+       (remove (fn [[_ v]]
+                 (pred v)))
+       (into (empty m))))
+
+(defn find-first [pred coll]
+  (->> coll
+       (filter pred)
+       first))
+
+(defn with-index [coll]
+  (map vector coll (range)))
+
+(defn update-some
+  "Like update, but only applies f when key k exists in map m."
+  [m k f]
+  (if (contains? m k)
+    (update m k f)
+    m))
+
+(defn devectorize
+  "Return the first element of x if x is a one-element vector."
+  [x]
+  (if (= 1 (count x))
+    (first x)
+    x))
+(ns statecharts.clock)
+
+(defprotocol Clock
+  (getTimeMillis [this] "Return the current time in milliseconds")
+  (setTimeout [this f delay])
+  (clearTimeout [this id]))
+
+#?(:cljs
+   (deftype WallClock []
+     Clock
+     (getTimeMillis [this]
+       (js/Date.now))
+     (setTimeout [this f delay]
+       (js/setTimeout f delay))
+     (clearTimeout [this id]
+       (js/clearTimeout id))))
+
+;; TODO
+#?(:clj
+   (deftype WallClock []
+     Clock
+     (getTimeMillis [this]
+       (System/currentTimeMillis))
+     (setTimeout [this f delay])
+     (clearTimeout [this id])))
+
+(defn wall-clock []
+  (WallClock.))
+
+(def ^:dynamic ^Clock *clock*
+  "The scheduler clock for the current fsm"
+  nil)
+
+(defn now
+  ""
+  []
+  (assert *clock*)
+  (getTimeMillis *clock*))
+(ns statecharts.delayed
+  (:require [clojure.walk :refer [postwalk]]
+            [statecharts.utils :as u]))
+
+(defprotocol IScheduler
+  (schedule [this fsm state event delay])
+  (unschedule [this fsm state event]))
+
+(defn scheduler? [x]
+  (satisfies? IScheduler x))
+
+(def path-placeholder [:<path>])
+
+(defn delay-fn-id [d]
+  (if (int? d)
+    d
+    #?(:cljs (aget d "name")
+       :clj (str (type d)))))
+
+(defn generate-delayed-events [delay txs]
+  (let [event [:fsm/delay
+               path-placeholder
+               ;; When the delay is a context function, after each
+               ;; reload its value of change, causing the delayed
+               ;; event can't find a match in :on keys. To cope with
+               ;; this we extract the function name as the event
+               ;; element instead.
+               (delay-fn-id delay)]]
+    ;; (def vd1 delay)
+    {:entry {:action :fsm/schedule-event
+             :event-delay delay
+             :event event}
+     :exit {:action :fsm/unschedule-event
+            :event event}
+     :on [event (mapv #(dissoc % :delay) txs)]}))
+
+#_(generate-delayed-events 1000 [{:delay 1000 :target :s1 :guard :g1}
+                                 {:delay 1000 :target :s2}])
+
+#_(group-by odd? [1 2 3])
+
+;; statecharts.impl/T_DelayedTransition
+;; =>
+#_[:map
+   [:entry]
+   [:exit]
+   [:on]]
+(defn derived-delay-info [delayed-transitions]
+  (doseq [dt delayed-transitions]
+    (assert (contains? dt :delay)
+      (str "no :delay key found in" dt)))
+  (->> delayed-transitions
+       (group-by :delay)
+       ;; TODO: the transition's entry/exit shall be grouped by delay,
+       ;; otherwise a delay with multiple targets (e.g. with guards)
+       ;; would result in multiple entry/exit events.
+       (map (fn [[delay txs]]
+              (generate-delayed-events delay txs)))
+       (reduce (fn [accu curr]
+                 (merge-with conj accu curr))
+              {:entry [] :exit [] :on []})))
+
+#_(derived-delay-info [:s1] [{:delay 1000 :target :s1 :guard :g1}
+                             {:delay 2000 :target :s2}])
+
+(defn insert-delayed-transitions
+  "Translate delayed transitions into internal entry/exit actions and
+  transitions."
+  [node]
+  ;; node
+  (let [after (:after node)]
+    (if-not after
+      node
+      (let [{:keys [entry exit on]} (derived-delay-info after)
+            on (into {} on)
+            vconcat (fn [xs ys]
+                      (-> (concat xs ys) vec))]
+        (-> node
+            (update :entry vconcat entry)
+            (update :exit vconcat exit)
+            (update :on merge on))))))
+
+(defn replace-path [path form]
+  (if (nil? form)
+    form
+    (postwalk (fn [x]
+                x
+                (if (= x path-placeholder)
+                  path
+                  x))
+              form)))
+
+(defn replace-delayed-place-holder
+  ([fsm]
+   (replace-delayed-place-holder fsm []))
+  ([node path]
+   (let [replace-path (partial replace-path path)]
+     (cond-> node
+       (:on node)
+       (update :on replace-path)
+
+       (:entry node)
+       (update :entry replace-path)
+
+       (:exit node)
+       (update :exit replace-path)
+
+       (:states node)
+       (update :states
+               (fn [states]
+                 (u/map-kv (fn [id node]
+                             [id
+                              (replace-delayed-place-holder node (conj path id))])
+                           states)))
+
+       (:regions node)
+       (update :regions
+               (fn [regions]
+                 (u/map-kv (fn [id node]
+                             [id
+                              (replace-delayed-place-holder node (conj path id))])
+                           regions)))))))
+
+#_(replace-delayed-place-holder
+ {:on {[:fsm/delay [:<path>] 1000] :s2}
+  :states {:s3 {:on {[:fsm/delay [:<path>] 1000] :s2}
+                :entry [{:fsm/type :schedule-event
+                         :fsm/delay 1000
+                         :fsm/event [:fsm/delay [:<path>] 1000]}]}}
+  :entry [{:fsm/type :schedule-event
+           :fsm/delay 1000
+           :fsm/event [:fsm/delay [:<path>] 1000]}]} [:root])
 (ns statecharts.impl
   (:require [clojure.set]
             [statecharts.clock :refer [*clock*]]
@@ -851,3 +1084,281 @@
         v2 (u/ensure-vector value)]
     (is-prefix? v2 v1)))
 
+(ns statecharts.store
+  "This namespace provides an interface for a mutable datastore for one or more
+  states.
+
+  It is used in places that are concerned with storing states as they change _over
+  time_. So, [[statecharts.service]], which notifies listeners when a state
+  changes, and [[statecharts.integrations.re-frame]], which persists state changes
+  in a re-frame app-db, both use it. It is also used in [[statecharts.scheduler]],
+  which is concerned with scheduling state changes that will happen at some future
+  time."
+  (:require [statecharts.impl :as impl]))
+
+(defprotocol IStore
+  (unique-id [this state]
+    "Get the id that the store uses to identify this state.")
+  (initialize [this machine opts]
+    "Initialize a state, and save it in the store.")
+  (transition [this machine state event opts]
+    "Transition a state previously saved in the store. Save and return its new value.")
+  (get-state [this id]
+    "Get the current value of a state, by its id."))
+
+
+(defrecord SingleStore [state*]
+  IStore
+  (unique-id [_ _state] :context)
+  (initialize [_ machine opts]
+    (reset! state* (impl/initialize machine opts)))
+  (transition [_ machine _state event opts]
+    (swap! state* #(impl/transition machine % event opts)))
+  (get-state [_ _]
+    @state*))
+
+(defn single-store
+  "A single-store stores the current value of a single state."
+  []
+  (SingleStore. (atom nil)))
+
+(defrecord ManyStore [states* id]
+  IStore
+  (unique-id [_ state] (get state id))
+  (initialize [this machine opts]
+    (let [state (-> (impl/initialize machine opts)
+                    (update id #(or % (gensym))))]
+      (swap! states* assoc (unique-id this state) state)
+      state))
+  (transition [this machine state event opts]
+    (let [state-id (unique-id this state)]
+      (swap! states* update state-id #(impl/transition machine % event opts))
+      (get-state this state-id)))
+  (get-state [_ id]
+    (get @states* id)))
+
+(defn many-store
+  "A many-store stores the current values of many states.
+
+  The `opts` provided to `init` should configure the state to have a unique id.
+  This ensures that the state can be identified and transitioned later, by both
+  external and scheduled events.
+
+  By default, a many-store expects the id to be `:id`.
+  ```clojure
+  (let [store (store/many-store)]
+    (store/initialize store fsm {:context {:id 1}})
+    (store/get-state store 1))
+  ```
+  The id can be configured by providing an `:id` key in the many-store
+  configuration options.
+  ```clojure
+  (let [store (store/many-store {:id :my-id})]
+    (store/initialize store fsm {:context {:my-id 1}})
+    (store/get-state store 1))
+  ```
+  "
+  ([] (many-store {}))
+  ([{:keys [id] :or {id :id}}]
+   (ManyStore. (atom {}) id)))
+(ns statecharts.scheduler
+  (:require [statecharts.store :as store]
+            [statecharts.delayed :as delayed]
+            [statecharts.clock :as clock]))
+
+(deftype Scheduler [dispatch timeout-ids clock]
+  delayed/IScheduler
+  (schedule [_ fsm state event delay]
+    (let [timeout-id (clock/setTimeout clock #(dispatch fsm state event) delay)]
+      (swap! timeout-ids assoc event timeout-id)))
+
+  (unschedule [_ _fsm _state event]
+    (when-let [timeout-id (get @timeout-ids event)]
+      (clock/clearTimeout clock timeout-id)
+      (swap! timeout-ids dissoc event))))
+
+(defn ^{:deprecated "0.1.2"} make-scheduler
+  "DEPRECATED: Use [[make-store-scheduler]] instead.
+
+  If we are scheduling events, we must be saving them somewhere, implying that we
+  have a store. make-store-scheduler is a neater combination of those
+  responsibilities: transition and save."
+  ([dispatch clock]
+   (Scheduler. dispatch (atom {}) clock)))
+
+(deftype StoreScheduler [store timeout-ids clock]
+  delayed/IScheduler
+  (schedule [_ fsm state event delay]
+    (let [state-id   (store/unique-id store state)
+          timeout-id (clock/setTimeout clock #(store/transition store fsm state event nil) delay)]
+      (swap! timeout-ids assoc-in [state-id event] timeout-id)))
+  (unschedule [_ _fsm state event]
+    (let [state-id   (store/unique-id store state)
+          timeout-id (get-in @timeout-ids [state-id event])]
+      (when timeout-id
+        (clock/clearTimeout clock timeout-id)
+        (swap! timeout-ids update state-id dissoc event)))))
+
+(defn make-store-scheduler
+  "Returns a scheduler that can be used to [[statecharts.delayed/schedule]] events
+  afer some delay. The `store`, which is a `statecharts.store/IStore` contains the
+  current values of the states, and will be updated as those states are
+  transitioned by the scheduled events. The `clock` is part of the delay
+  mechanism."
+  ([store clock]
+   (StoreScheduler. store (atom {}) clock)))
+(ns statecharts.sim
+  (:require [statecharts.clock :refer [Clock setTimeout clearTimeout]]))
+
+(defprotocol ISimulatedClock
+  (now [this])
+  (events [this])
+  (advance [this ms]))
+
+(deftype SimulatedClock [events
+                         ^:volatile-mutable id
+                         ^:volatile-mutable now_]
+  Clock
+  (getTimeMillis [_]
+    now_)
+  (setTimeout [_ f delay]
+    (set! id (inc id))
+    (swap! events assoc id {:f f :event-time (+ now_ delay)})
+    id)
+
+  (clearTimeout [_ id]
+    (swap! events dissoc id)
+    nil)
+
+  ISimulatedClock
+  (now [this]
+    now_)
+  (events [this]
+    @events)
+  (advance [this ms]
+    (set! now_ (+ now_ ms))
+    (doseq [[id {:keys [f event-time]}] @events]
+      (if (>= now_ event-time)
+        (do (f)
+            (clearTimeout this id))
+        [:not-yet now_ event-time f]))))
+
+(defn simulated-clock []
+  (SimulatedClock. (atom nil) 0 0))
+
+
+(comment
+  (def simclock (simulated-clock))
+  (setTimeout simclock #(println :e1) 1000)
+  (setTimeout simclock #(println :e2) 2000)
+  (events simclock)
+  (advance simclock 1000)
+  (now simclock)
+  ())
+(ns statecharts.service
+  (:require [statecharts.clock :as clock]
+            [statecharts.store :as store]
+            [statecharts.scheduler :as scheduler])
+  (:refer-clojure :exclude [send]))
+
+(defn attach-fsm-scheduler [fsm store clock]
+  (assoc fsm :scheduler (scheduler/make-store-scheduler store clock)))
+
+(defprotocol IService
+  (start [this])
+  (send [this event])
+  (state [this])
+  (add-listener [this id listener])
+  (reload [this fsm]))
+
+(defn wrap-listener [f]
+  (fn [_ _ old new]
+    (f old new)))
+
+(deftype Service [^:volatile-mutable fsm
+                  store
+                  ^:volatile-mutable running
+                  clock
+                  transition-opts]
+  IService
+  (start [this]
+    (when-not running
+      (set! running true)
+      (store/initialize store fsm nil)))
+  (state [this]
+    (store/get-state store nil))
+  (send [_ event]
+    (let [old-state (store/get-state store nil)]
+      (store/transition store fsm old-state event transition-opts))
+    (store/get-state store nil))
+  (add-listener [_ id listener]
+    ;; Kind of gross to reach down into the store's internals. Then again, the fact
+    ;; that the store is a single-store is an implementation detail known only to
+    ;; this namespace.
+    (add-watch (:state* store) id (wrap-listener listener)))
+  (reload [this fsm_]
+    (set! fsm (attach-fsm-scheduler fsm_ store clock))))
+
+(defn default-opts []
+  {:clock (clock/wall-clock)})
+
+(defn service
+  ([fsm]
+   (service fsm nil))
+  ([fsm opts]
+   (let [{:keys [clock
+                 transition-opts]} (merge (default-opts) opts)
+         store (store/single-store)]
+     (Service. (attach-fsm-scheduler fsm store clock)
+               ;; state store
+               store
+               ;; running
+               false
+               clock
+               transition-opts))))
+(ns statecharts.core
+  (:require [statecharts.impl :as impl]
+            [statecharts.service :as service]
+            [statecharts.utils :refer [ensure-vector]])
+  (:refer-clojure :exclude [send]))
+
+(def machine impl/machine)
+(def initialize impl/initialize)
+(def transition impl/transition)
+(def assign impl/assign)
+
+(def service service/service)
+(defn start [service]
+  (service/start service))
+(defn reload [service fsm]
+  (service/reload service fsm))
+
+(defn send
+  ([service event]
+   (send service event nil))
+  ([service event _]
+   (service/send service event)))
+
+(defn state [service]
+  (service/state service))
+
+(defn value [service]
+  (-> service state :_state))
+
+(defn matches [state value]
+  (let [v1 (ensure-vector
+            (if (map? state)
+              (:_state state)
+              state))
+        v2 (ensure-vector value)]
+    (impl/is-prefix? v2 v1)))
+
+(defn update-state
+  "Provide a pathway to modify the state of a state machine directly
+  without going through any event.
+
+  Return the updated context.
+  "
+  [^statecharts.service.Service service f & args]
+  (let [state (.-state service)]
+    (swap! state #(apply f % args))))
