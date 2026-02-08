@@ -111,7 +111,15 @@
                  (u/map-kv (fn [id node]
                              [id
                               (replace-delayed-place-holder node (conj path id))])
-                           states)))))))
+                           states)))
+
+       (:regions node)
+       (update :regions
+               (fn [regions]
+                 (u/map-kv (fn [id node]
+                             [id
+                              (replace-delayed-place-holder node (conj path id))])
+                           regions)))))))
 
 #_(replace-delayed-place-holder
  {:on {[:fsm/delay [:<path>] 1000] :s2}

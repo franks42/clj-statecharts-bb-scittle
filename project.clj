@@ -16,8 +16,7 @@
                                cljsjs/create-react-class]]
                  [day8.re-frame/test "0.1.5"
                   :scope "provided"
-                  :exclusions [re-frame]]
-                 [metosin/malli "0.8.9"]]
+                  :exclusions [re-frame]]]
 
   :deploy-repositories [["clojars" {:url           "https://clojars.org/repo"
                                     :username      :env/clojars_user

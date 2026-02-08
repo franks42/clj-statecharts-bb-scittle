@@ -1,16 +1,11 @@
 (ns statecharts.impl
-  (:require [malli.core :as ma]
-            [malli.transform :as mt]
-            [clojure.set]
-            [malli.error]
+  (:require [clojure.set]
             [statecharts.clock :refer [*clock*]]
             [statecharts.delayed
              :as fsm.d
              :refer [insert-delayed-transitions
-                     replace-delayed-place-holder
-                     scheduler?]]
-            [statecharts.utils :as u]
-            [statecharts.macros :refer [prog1]])
+                     replace-delayed-place-holder]]
+            [statecharts.utils :as u])
   (:refer-clojure :exclude [send]))
 
 (defn canon-one-transition [x]
@@ -40,52 +35,10 @@
     x
     {:type x}))
 
-(def T_Actions
-  [:vector {:decode/fsm canon-actions}
-   [:fn ifn?]])
 
-(def T_Target
-  "See `resolve-target` for the synatx of target definition."
-  [:or
-   keyword?
-   [:vector keyword?]])
-
-(def T_Transition
-  [:vector {:decode/fsm canon-transitions}
-   [:map {:closed true}
-    [:target {:optional true} T_Target]
-    [:guard {:optional true} [:fn ifn?]]
-    [:actions {:optional true} T_Actions]]])
-
-(def T_Entry
-  [:entry {:optional true} T_Actions])
-
-(def T_Exit
-  [:exit {:optional true} T_Actions])
-
-(def T_DelayExpression
-  [:or
-   int?
-   ;; when replaced as a
-   [:fn ifn?]])
-
-(def T_DelayedEvent
-  "Generated internal event for delayed transitions."
-  [:tuple keyword? T_Target [:or int?
-                             ;; See delayed/generate-delayed-events
-                             ;; for why we use string instead of
-                             ;; delayed fn as the event key.
-                             :string]])
-
-(def T_Event
-  [:or keyword? T_DelayedEvent])
-
-(def T_Transitions
-  [:on {:optional true}
-   [:map-of T_Event T_Transition]])
-
-(def T_Initial
-  [:initial {:optional true} T_Target])
+(defn- normalize-transition [{:keys [actions] :as t}]
+  (cond-> t
+    actions (update :actions canon-actions)))
 
 (defn decode-delayed-map [m]
   ;; {1000 :s1 2000 :s2}
@@ -105,26 +58,11 @@
                        2000 :s2})
 
 (defn decode-delayed-transitions [x]
-  (if (map? x)
-    (decode-delayed-map x)
-    x))
+  (let [normalized (if (map? x)
+                     (decode-delayed-map x)
+                     x)]
+    (mapv normalize-transition normalized)))
 
-(def T_DelayedTransition
-  [:map {:closed true}
-   [:delay T_DelayExpression]
-   [:target {:optional true} T_Target]
-   [:guard {:optional true} [:fn ifn?]]
-   [:actions {:optional true} T_Actions]])
-
-(def T_DelayedTransitions
-  [:vector {:decode/fsm decode-delayed-transitions}
-   T_DelayedTransition])
-
-(def T_After
-  [:after {:optional true} T_DelayedTransitions])
-
-(def T_EventlessTransitions
-  [:always {:optional true} T_Transition])
 
 (defn insert-eventless-transitions [node]
   (let [always (:always node)]
@@ -132,82 +70,48 @@
       node
       (update node :on assoc :fsm/always always))))
 
-(def T_Type
-  [:type {:optional true} [:enum :parallel]])
-
-(def T_States
-  [:schema
-   {:registry
-            {::state [:map {:closed true
-                            :decode/fsm {:leave (comp
-                                                 insert-eventless-transitions
-                                                 insert-delayed-transitions)}}
-                      T_After
-                      T_Entry
-                      T_Exit
-                      T_EventlessTransitions
-                      T_Transitions
-                      T_Initial
-                      ;; TODO: dispatch on type
-                      T_Type
-                      [:states {:optional true}
-                       [:map-of keyword? [:ref ::state]]]
-                      [:regions {:optional true}
-                       [:map-of keyword? [:ref ::state]]]]}}
-   [:map-of keyword? [:ref ::state]]])
-
-#_(ma/validate T_States {:s1 {:on {:e1 {:target :s2}}}
-                       :s2 {:initial :s2.1
-                            :states {:s2.1 {:on {:e2.1_2.2 {:target :s2.2}}}}}})
-
-(def T_Integrations
-  [:integrations {:optional true}
-   [:map {:closed true}
-    [:re-frame {:optional true}
-     [:map
-      [:path any?]
-      [:transition-event {:optional true} keyword?]
-      [:initialize-event {:optional true} keyword?]]]]])
-
-(def T_Machine
-  [:map {:decode/fsm {:leave (comp
-                              replace-delayed-place-holder
-                              insert-delayed-transitions)}}
-   T_Integrations
-   [:id keyword?]
-   [:context {:optional true} any?]
-   [:scheduler {:optional true} [:fn scheduler?]]
-   T_Transitions
-   T_After
-   T_Entry
-   T_Exit
-   T_Initial
-   ;; TODO: dispatch on type
-   T_Type
-   [:states {:optional true} T_States]
-   [:regions {:optional true} T_States]])
-
 (declare validate-targets)
+(declare normalize-states)
+
+(defn- normalize-on [on]
+  (when on
+    (u/map-vals (fn [v] (mapv normalize-transition (canon-transitions v))) on)))
+
+(defn- normalize-always [always]
+  (when always
+    (mapv normalize-transition (canon-transitions always))))
+
+(defn- normalize-state [node]
+  (-> node
+      (u/update-some :entry canon-actions)
+      (u/update-some :exit canon-actions)
+      (u/update-some :on normalize-on)
+      (u/update-some :after decode-delayed-transitions)
+      (u/update-some :always normalize-always)
+      (u/update-some :states normalize-states)
+      (u/update-some :regions normalize-states)
+      insert-delayed-transitions
+      insert-eventless-transitions))
+
+(defn- normalize-states [states]
+  (u/map-vals normalize-state states))
+
+(defn- normalize-machine [orig]
+  (-> orig
+      (u/update-some :entry canon-actions)
+      (u/update-some :exit canon-actions)
+      (u/update-some :on normalize-on)
+      (u/update-some :after decode-delayed-transitions)
+      (u/update-some :always normalize-always)
+      (u/update-some :states normalize-states)
+      (u/update-some :regions normalize-states)
+      insert-delayed-transitions
+      replace-delayed-place-holder))
 
 (defn machine
-  "Create a canonical presentation of the machine using malli."
+  "Create a normalized, canonical representation of the machine spec."
   [orig]
-  (let [conformed (ma/decode T_Machine orig
-                    (mt/transformer
-                     mt/default-value-transformer
-                     {:name :fsm}))]
-    (when-not (ma/validate T_Machine conformed)
-      ;; TODO: ensure the initial target exists
-      (let [reason (malli.error/humanize (ma/explain T_Machine conformed))
-            machine-id (:id conformed)
-            msg (cond-> "Invalid fsm machine spec:"
-                  machine-id
-                  (str " machine-id=" machine-id))]
-        #?(:cljs
-           (js/console.warn msg (-> reason
-                                    (clj->js)
-                                    (js/JSON.stringify))))
-        (throw (ex-info msg reason))))
+  (let [conformed (normalize-machine orig)]
     (validate-targets conformed)
     conformed))
 
@@ -267,19 +171,6 @@
                (not debug)
                (dissoc :_actions))
              (:_actions state)))))
-
-(def PathElement
-  "Schema of an element of a expanded path. We need the
-  transitions/exit/entry information to:
-  1. transitions: in a compound node, decide which level handles
-     the event
-  2. :id of each level to resolve the target state node.
-  3. entry/exit: collect the actions during a transtion transition."
-  [:map {:closed true}
-   [:id [:maybe keyword?]]
-   T_Transitions
-   T_Entry
-   T_Exit])
 
 (defn- parallel? [node]
   (some-> (:type node)
@@ -410,28 +301,6 @@
   "Update the last element of a vector"
   [v f & args]
   (apply update v (dec (count v)) f args))
-
-(def RT_NodePath
-  [:vector :keyword])
-
-(def RT_Node
-  [:map
-   [:path RT_NodePath]
-   [:on {:optional true} [:map-of :keyword :any]]
-   [:type :enum [:atomic :compound :parallel]]
-   [:entry {:optional true} :any]
-   [:exit {:optional true} :any]])
-
-(def RT_TX
-  [:map {:closed true}
-   [:source {:optional true} RT_NodePath]
-   [:target {:optional true} RT_NodePath]
-   [:domain {:optional true} RT_NodePath]
-   [:guard {:optional true} [:vector :fn]]
-   [:actions {:optional true} [:vector :fn]]])
-
-(def T_Configuration
-  [:set RT_NodePath])
 
 (defn add-node-type [node]
   (let [type (cond
@@ -982,21 +851,3 @@
         v2 (u/ensure-vector value)]
     (is-prefix? v2 v1)))
 
-(comment
-  (ma/validate keyword? :a)
-
-  (def m1
-    {:id :foo
-     :initial :s1
-     :states {:s1 {:on {:e1 :s2
-                        :e12 {:target :s3
-                              :actions :a12}}}
-              :s2 {:on {:e2 {:target :s3
-                             :actions [:a31 :a32]}}}}})
-  (machine m1)
-  (ma/validate T_Machine m1)
-  (ma/explain T_Machine m1)
-  (ma/validate T_Machine (machine m1))
-  (ma/explain T_Machine (machine m1))
-
-  ())

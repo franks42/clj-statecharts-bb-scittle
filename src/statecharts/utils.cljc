@@ -48,6 +48,13 @@
 (defn with-index [coll]
   (map vector coll (range)))
 
+(defn update-some
+  "Like update, but only applies f when key k exists in map m."
+  [m k f]
+  (if (contains? m k)
+    (update m k f)
+    m))
+
 (defn devectorize
   "Return the first element of x if x is a one-element vector."
   [x]
