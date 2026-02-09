@@ -19,6 +19,7 @@ cat \
   "$SRC/sim.cljc" \
   "$SRC/service.cljc" \
   "$SRC/core.cljc" \
+  "$SRC/viz.cljc" \
   > "$OUTPUT"
 
 echo "Bundle written to dist/statecharts-bundle.cljc ($(wc -l < "$OUTPUT") lines)"

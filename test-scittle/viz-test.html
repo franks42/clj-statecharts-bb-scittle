@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>clj-statecharts XState Visualizer Export</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           max-width: 900px; margin: 40px auto; padding: 0 20px; color: #222; }
+    h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+    h2 { margin-top: 2em; color: #444; }
+    pre { background: #f5f5f5; padding: 16px; border-radius: 6px; overflow-x: auto;
+          font-size: 13px; line-height: 1.5; border: 1px solid #ddd; position: relative; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 12px;
+                background: #007bff; color: white; border: none; border-radius: 4px;
+                cursor: pointer; font-size: 12px; }
+    .copy-btn:hover { background: #0056b3; }
+    .copy-btn.copied { background: #28a745; }
+    .test-result { padding: 4px 8px; margin: 2px 0; border-radius: 4px; font-family: monospace; }
+    .pass { color: green; }
+    .fail { color: red; }
+    a { color: #007bff; }
+    .viz-link { display: inline-block; margin-top: 8px; padding: 6px 14px;
+                background: #6c63ff; color: white; text-decoration: none;
+                border-radius: 4px; font-size: 14px; }
+    .viz-link:hover { background: #5a52d5; }
+  </style>
+</head>
+<body>
+  <h1>clj-statecharts to XState JSON</h1>
+  <p>Convert clj-statecharts machine definitions to XState v5 JSON for the
+    <a href="https://stately.ai/viz" target="_blank">Stately Visualizer</a>.</p>
+
+  <div id="results">Loading Scittle and source files...</div>
+
+  <!-- Scittle CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.7.30/dist/scittle.js"></script>
+
+  <!-- Source files in dependency order -->
+  <script type="application/x-scittle" src="/src/statecharts/utils.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/clock.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/delayed.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/impl.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/store.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/scheduler.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/sim.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/service.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/core.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/viz.cljc"></script>
+
+  <!-- Test and demo script -->
+  <script type="application/x-scittle">
+(ns statecharts.viz-test
+  (:require [statecharts.core :as fsm :refer [assign]]
+            [statecharts.viz :as viz]
+            [clojure.string :as str]))
+
+;; --- Test Infrastructure ---
+(def test-results (atom {:pass 0 :fail 0 :tests []}))
+
+(defn report-pass [name]
+  (swap! test-results update :pass inc)
+  (swap! test-results update :tests conj {:name name :status :pass}))
+
+(defn report-fail [name msg]
+  (swap! test-results update :fail inc)
+  (swap! test-results update :tests conj {:name name :status :fail :msg msg}))
+
+(defn is= [test-name expected actual]
+  (if (= expected actual)
+    (report-pass test-name)
+    (report-fail test-name (str "Expected " (pr-str expected) " got " (pr-str actual)))))
+
+(defn is-truthy [test-name actual]
+  (if actual
+    (report-pass test-name)
+    (report-fail test-name (str "Expected truthy but got " (pr-str actual)))))
+
+;; --- Sample Machines ---
+
+(def traffic-light
+  {:id :traffic-light
+   :initial :green
+   :states
+   {:green  {:on {:timer :yellow}}
+    :yellow {:on {:timer :red}}
+    :red    {:on {:timer :green}}}})
+
+(def with-context
+  {:id :counter
+   :initial :idle
+   :context {:count 0}
+   :states
+   {:idle    {:on {:start :running}}
+    :running {:on {:stop :idle
+                   :tick {:actions (assign (fn [ctx & _]
+                                            (update ctx :count inc)))}}}}})
+
+(def with-guards
+  {:id :guarded
+   :initial :idle
+   :context {:x 0}
+   :states
+   {:idle {:on {:go [{:target :high
+                      :guard (fn [ctx _] (> (:x ctx) 10))}
+                     {:target :low}]}}
+    :high {}
+    :low {}}})
+
+(def nested-machine
+  {:id :nested
+   :initial :s1
+   :states
+   {:s1 {:initial :s1a
+          :on {:go-s2 :s2}
+          :states
+          {:s1a {:on {:next :s1b}}
+           :s1b {}}}
+    :s2 {}}})
+
+(def parallel-machine
+  {:id :formatting
+   :type :parallel
+   :regions
+   {:bold   {:initial :off
+             :states {:on  {:on {:toggle-bold :off}}
+                      :off {:on {:toggle-bold :on}}}}
+    :italic {:initial :off
+             :states {:on  {:on {:toggle-italic :off}}
+                      :off {:on {:toggle-italic :on}}}}}})
+
+(def with-always
+  {:id :auto
+   :initial :checking
+   :context {:value 100}
+   :states
+   {:checking {:always [{:target :high
+                          :guard (fn [{:keys [value]} _] (> value 50))}
+                         {:target :low}]}
+    :high {}
+    :low {}}})
+
+(def with-entry-exit
+  {:id :with-actions
+   :initial :off
+   :states
+   {:off {:on {:turn-on :on}
+          :exit (fn [ctx _] (js/console.log "exiting off") ctx)}
+    :on  {:on {:turn-off :off}
+          :entry (fn [ctx _] (js/console.log "entering on") ctx)}}})
+
+(def with-delayed
+  {:id :timeout
+   :initial :active
+   :states
+   {:active {:after {5000 :idle}
+             :on {:activity :active}}
+    :idle   {:on {:wake :active}}}})
+
+;; --- Tests ---
+
+(defn test-basic-conversion []
+  (let [result (viz/machine->xstate traffic-light)]
+    (is= "basic: has id" "traffic-light" (get result "id"))
+    (is= "basic: has initial" "green" (get result "initial"))
+    (is= "basic: has states" true (contains? result "states"))
+    (is= "basic: green->yellow" "yellow"
+         (get-in result ["states" "green" "on" "timer"]))))
+
+(defn test-context []
+  (let [result (viz/machine->xstate with-context)]
+    (is= "context: preserved" {:count 0} (get result "context"))))
+
+(defn test-guards []
+  (let [result (viz/machine->xstate with-guards)
+        go-transitions (get-in result ["states" "idle" "on" "go"])]
+    (is= "guards: two transitions" 2 (count go-transitions))
+    (is= "guards: first has guard" true
+         (contains? (first go-transitions) "guard"))
+    (is= "guards: first target" "high"
+         (get (first go-transitions) "target"))))
+
+(defn test-nested []
+  (let [result (viz/machine->xstate nested-machine)]
+    (is= "nested: outer initial" "s1" (get result "initial"))
+    (is= "nested: inner initial" "s1a"
+         (get-in result ["states" "s1" "initial"]))
+    (is= "nested: inner states" true
+         (contains? (get-in result ["states" "s1"]) "states"))))
+
+(defn test-parallel []
+  (let [result (viz/machine->xstate parallel-machine)]
+    (is= "parallel: type" "parallel" (get result "type"))
+    (is= "parallel: has bold" true
+         (contains? (get result "states") "bold"))
+    (is= "parallel: has italic" true
+         (contains? (get result "states") "italic"))
+    (is= "parallel: bold initial" "off"
+         (get-in result ["states" "bold" "initial"]))))
+
+(defn test-always []
+  (let [result (viz/machine->xstate with-always)
+        always-val (get-in result ["states" "checking" "always"])]
+    (is-truthy "always: present" always-val)
+    (is= "always: is vector" true (vector? always-val))
+    (is= "always: first target" "high"
+         (get (first always-val) "target"))))
+
+(defn test-entry-exit []
+  (let [result (viz/machine->xstate with-entry-exit)]
+    (is-truthy "entry: on state has entry"
+               (get-in result ["states" "on" "entry"]))
+    (is-truthy "exit: off state has exit"
+               (get-in result ["states" "off" "exit"]))))
+
+(defn test-delayed []
+  (let [result (viz/machine->xstate with-delayed)
+        after-val (get-in result ["states" "active" "after"])]
+    (is-truthy "delayed: has after" after-val)
+    (is= "delayed: 5000ms target" "idle"
+         (let [v (get after-val "5000")]
+           (if (string? v) v (get v "target"))))))
+
+(defn test-json-roundtrip []
+  (let [json-str (viz/machine->xstate-json traffic-light)
+        parsed (js/JSON.parse json-str)
+        reparsed (js->clj parsed)]
+    (is= "json: valid parse" "traffic-light" (get reparsed "id"))
+    (is= "json: has states" true (contains? reparsed "states"))))
+
+(defn test-normalized-machine []
+  (let [machine (fsm/machine traffic-light)
+        result (viz/machine->xstate machine)]
+    (is= "normalized: has id" "traffic-light" (get result "id"))
+    (is= "normalized: has initial" "green" (get result "initial"))
+    (is= "normalized: has states" true (contains? result "states"))))
+
+;; --- Run Tests ---
+(defn run-test [name f]
+  (try
+    (f)
+    (catch js/Error e
+      (report-fail name (str "EXCEPTION: " (.-message e))))))
+
+(defn run-all-tests []
+  (reset! test-results {:pass 0 :fail 0 :tests []})
+
+  (run-test "basic-conversion" test-basic-conversion)
+  (run-test "context" test-context)
+  (run-test "guards" test-guards)
+  (run-test "nested" test-nested)
+  (run-test "parallel" test-parallel)
+  (run-test "always" test-always)
+  (run-test "entry-exit" test-entry-exit)
+  (run-test "delayed" test-delayed)
+  (run-test "json-roundtrip" test-json-roundtrip)
+  (run-test "normalized-machine" test-normalized-machine)
+
+  (let [{:keys [pass fail tests]} @test-results]
+    ;; Set window.testResults for Playwright
+    (set! (.-testResults js/window)
+          (clj->js {:pass pass :fail fail :done true}))
+
+    ;; Generate JSON outputs for demo
+    (let [examples [["Traffic Light" traffic-light]
+                    ["Counter with Context" with-context]
+                    ["Guarded Transitions" with-guards]
+                    ["Nested States" nested-machine]
+                    ["Parallel States" parallel-machine]
+                    ["Always (Eventless)" with-always]
+                    ["Entry/Exit Actions" with-entry-exit]
+                    ["Delayed Transitions" with-delayed]]
+          container (js/document.getElementById "results")]
+      (set! (.-innerHTML container)
+            (str
+              ;; Test results section
+              "<h2>Conversion Tests</h2>"
+              "<p><strong>" pass " passed, " fail " failed</strong></p>"
+              "<ul>"
+              (apply str
+                (map (fn [{:keys [name status msg]}]
+                       (str "<li class='test-result "
+                            (if (= status :pass) "pass" "fail") "'>"
+                            (if (= status :pass) "PASS" "FAIL")
+                            " " name
+                            (when msg (str " &mdash; " msg))
+                            "</li>"))
+                     tests))
+              "</ul>"
+
+              ;; JSON output demos
+              "<h2>XState JSON Output</h2>"
+              "<p>Click 'Copy' to copy JSON, then paste into "
+              "<a href='https://stately.ai/viz' target='_blank'>stately.ai/viz</a></p>"
+              "<a class='viz-link' href='https://stately.ai/viz' target='_blank'>"
+              "Open Stately Visualizer</a>"
+
+              (apply str
+                (map-indexed
+                  (fn [i [title machine-def]]
+                    (let [json-str (viz/machine->xstate-json machine-def)
+                          btn-id (str "copy-btn-" i)
+                          pre-id (str "json-" i)]
+                      (str "<h3>" title "</h3>"
+                           "<pre id='" pre-id "'>"
+                           "<button class='copy-btn' id='" btn-id "'"
+                           " onclick='copyJson(\"" pre-id "\", \"" btn-id "\")'>Copy</button>"
+                           json-str
+                           "</pre>")))
+                  examples)))))))
+
+(run-all-tests)
+  </script>
+
+  <script>
+    // Plain JS copy helper (outside Scittle)
+    function copyJson(preId, btnId) {
+      var pre = document.getElementById(preId);
+      // Get text content minus the button text
+      var text = pre.textContent.replace(/^Copy/, '').trim();
+      navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById(btnId);
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

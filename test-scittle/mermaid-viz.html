@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>clj-statecharts Mermaid Visualization</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #222; }
+    h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+    h3 { color: #555; margin-top: 1.5em; }
+    .diagram-container { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .mermaid-box { background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px;
+                   padding: 16px; min-width: 300px; flex: 1; }
+    .source-box { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 16px;
+                  font-family: monospace; font-size: 12px; white-space: pre; overflow-x: auto;
+                  min-width: 280px; flex: 0 0 auto; max-width: 400px; line-height: 1.4; }
+    #results { margin-top: 20px; }
+    .test-result { padding: 4px 8px; margin: 2px 0; font-family: monospace; }
+    .pass { color: green; }
+    .fail { color: red; }
+    .summary { font-size: 1.2em; font-weight: bold; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>clj-statecharts Mermaid Visualization</h1>
+  <p>Statecharts rendered inline using <a href="https://mermaid.js.org/">Mermaid.js</a>,
+     converted from clj-statecharts machine definitions via <code>viz/machine-&gt;mermaid</code>.</p>
+
+  <div id="results">Loading Scittle and source files...</div>
+  <div id="diagrams"></div>
+
+  <!-- Scittle CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.7.30/dist/scittle.js"></script>
+
+  <!-- Source files in dependency order -->
+  <script type="application/x-scittle" src="/src/statecharts/utils.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/clock.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/delayed.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/impl.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/store.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/scheduler.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/sim.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/service.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/core.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/viz.cljc"></script>
+
+  <!-- Generate Mermaid markup via Scittle -->
+  <script type="application/x-scittle">
+(ns statecharts.mermaid-demo
+  (:require [statecharts.core :as fsm :refer [assign]]
+            [statecharts.viz :as viz]))
+
+;; --- Sample Machines ---
+
+(def traffic-light
+  {:id :traffic-light
+   :initial :green
+   :states
+   {:green  {:on {:timer :yellow}}
+    :yellow {:on {:timer :red}}
+    :red    {:on {:timer :green}}}})
+
+(def counter
+  {:id :counter
+   :initial :idle
+   :context {:count 0}
+   :states
+   {:idle    {:on {:start :running}
+              :entry (fn [ctx _] ctx)}
+    :running {:on {:stop :idle
+                   :tick {:actions (assign (fn [ctx & _]
+                                            (update ctx :count inc)))}}}
+    :done    {}}})
+
+(def guarded
+  {:id :guarded
+   :initial :idle
+   :context {:x 0}
+   :states
+   {:idle {:on {:go [{:target :high
+                      :guard (fn [ctx _] (> (:x ctx) 10))}
+                     {:target :low}]}}
+    :high {}
+    :low {}}})
+
+(def nested
+  {:id :nested
+   :initial :s1
+   :states
+   {:s1 {:initial :s1a
+          :on {:go-s2 :s2}
+          :states
+          {:s1a {:on {:next :s1b}}
+           :s1b {}}}
+    :s2 {}}})
+
+(def parallel
+  {:id :formatting
+   :type :parallel
+   :regions
+   {:bold   {:initial :off
+             :states {:on  {:on {:toggle :off}}
+                      :off {:on {:toggle :on}}}}
+    :italic {:initial :off
+             :states {:on  {:on {:toggle :off}}
+                      :off {:on {:toggle :on}}}}}})
+
+(def with-always
+  {:id :auto-route
+   :initial :checking
+   :context {:value 100}
+   :states
+   {:checking {:always [{:target :high
+                          :guard (fn [{:keys [value]} _] (> value 50))}
+                         {:target :low}]}
+    :high {}
+    :low {}}})
+
+(def with-delayed
+  {:id :timeout
+   :initial :active
+   :states
+   {:active {:after {5000 :idle}
+             :on {:activity :active}}
+    :idle   {:on {:wake :active}}}})
+
+;; --- Tests ---
+
+(def test-results (atom {:pass 0 :fail 0 :tests []}))
+
+(defn report-pass [name]
+  (swap! test-results update :pass inc)
+  (swap! test-results update :tests conj {:name name :status :pass}))
+
+(defn report-fail [name msg]
+  (swap! test-results update :fail inc)
+  (swap! test-results update :tests conj {:name name :status :fail :msg msg}))
+
+(defn contains-str [test-name s substr]
+  (if (and (string? s) (.includes s substr))
+    (report-pass test-name)
+    (report-fail test-name (str "Expected to contain '" substr "' in: " (pr-str s)))))
+
+(defn run-test [name f]
+  (try (f) (catch js/Error e (report-fail name (str "EXCEPTION: " (.-message e))))))
+
+(run-test "mermaid: traffic-light" #(let [m (viz/machine->mermaid traffic-light)]
+  (contains-str "mermaid: has header" m "stateDiagram-v2")
+  (contains-str "mermaid: initial arrow" m "[*] --> green")
+  (contains-str "mermaid: green->yellow" m "green --> yellow : timer")
+  (contains-str "mermaid: yellow->red" m "yellow --> red : timer")
+  (contains-str "mermaid: red->green" m "red --> green : timer")))
+
+(run-test "mermaid: nested" #(let [m (viz/machine->mermaid nested)]
+  (contains-str "mermaid: nested state block" m "state s1 {")
+  (contains-str "mermaid: nested initial" m "[*] --> s1a")
+  (contains-str "mermaid: inner transition" m "s1a --> s1b : next")
+  (contains-str "mermaid: outer transition" m "s1 --> s2 : go-s2")))
+
+(run-test "mermaid: parallel" #(let [m (viz/machine->mermaid parallel)]
+  (contains-str "mermaid: parallel separator" m "--")))
+
+(run-test "mermaid: guards" #(let [m (viz/machine->mermaid guarded)]
+  (contains-str "mermaid: guard target high" m "idle --> high")))
+
+(run-test "mermaid: delayed" #(let [m (viz/machine->mermaid with-delayed)]
+  (contains-str "mermaid: after transition" m "after 5000ms")))
+
+(run-test "mermaid: always" #(let [m (viz/machine->mermaid with-always)]
+  (contains-str "mermaid: always transition" m "always")))
+
+;; --- Render results ---
+
+(let [{:keys [pass fail tests]} @test-results
+      container (js/document.getElementById "results")]
+
+  (set! (.-testResults js/window)
+        (clj->js {:pass pass :fail fail :done true}))
+
+  (set! (.-innerHTML container)
+        (str "<p class='summary'>" pass " passed, " fail " failed</p>"
+             "<ul>"
+             (apply str
+               (map (fn [{:keys [name status msg]}]
+                      (str "<li class='test-result "
+                           (if (= status :pass) "pass" "fail") "'>"
+                           (if (= status :pass) "PASS" "FAIL")
+                           " " name
+                           (when msg (str " &mdash; " msg))
+                           "</li>"))
+                    tests))
+             "</ul>")))
+
+;; --- Generate diagram HTML ---
+;; Store mermaid strings for rendering after Mermaid.js loads.
+
+(let [examples [["Traffic Light" traffic-light]
+                ["Counter (with actions)" counter]
+                ["Guarded Transitions" guarded]
+                ["Nested States" nested]
+                ["Parallel States (formatting)" parallel]
+                ["Always (eventless)" with-always]
+                ["Delayed Transitions" with-delayed]]
+      diagrams-el (js/document.getElementById "diagrams")]
+  (set! (.-innerHTML diagrams-el)
+        (apply str
+          (map-indexed (fn [i [title machine-def]]
+                 (let [mermaid-str (viz/machine->mermaid machine-def)
+                       diagram-id (str "diagram-" i)]
+                   (str "<h3>" title "</h3>"
+                        "<div class='diagram-container'>"
+                        "<div class='mermaid-box' id='" diagram-id "'>"
+                        "<pre class='mermaid'>\n" mermaid-str "\n</pre>"
+                        "</div>"
+                        "<div class='source-box'>" mermaid-str "</div>"
+                        "</div>")))
+               examples))))
+  </script>
+
+  <!-- Load Mermaid.js and render after Scittle has populated the DOM -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      logLevel: 'error'
+    });
+
+    // Scittle fetches external .cljc files asynchronously, so we need to
+    // wait until it has populated the .mermaid elements before rendering.
+    function waitAndRender() {
+      const els = document.querySelectorAll('.mermaid');
+      if (els.length > 0 && els[0].textContent.trim().length > 0) {
+        mermaid.run({ querySelector: '.mermaid' }).then(() => {
+          console.log('Mermaid rendering complete');
+          window.mermaidRendered = true;
+        }).catch(e => {
+          console.error('Mermaid render error:', e);
+          window.mermaidError = e.message;
+        });
+      } else {
+        setTimeout(waitAndRender, 200);
+      }
+    }
+    waitAndRender();
+  </script>
+</body>
+</html>
