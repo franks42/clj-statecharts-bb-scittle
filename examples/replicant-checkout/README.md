@@ -47,7 +47,7 @@ npm i puppeteer-core && node examples/replicant-checkout/smoke.mjs \
   http://127.0.0.1:8741/examples/replicant-checkout/index.html
 ```
 
-Tested so far: nbb (helper tests + verify) and Chrome via `smoke.mjs`. The bb and JVM
+Tested so far: nbb (helper tests + verify) and Chrome via `smoke.mjs`. For many components, see `../../COMPOSE.md`. The bb and JVM
 runs are written for (`#?(:clj …)` branches) but **not yet run**.
 
 `verify` reports, per fixture: dead controls (enabled, but a guard or a missing

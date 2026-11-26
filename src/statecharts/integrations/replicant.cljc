@@ -140,16 +140,20 @@
   [handler-data]
   (boolean (some placeholder? (tree-seq coll? seq handler-data))))
 
-(defn enabled?
-  "Would `action` actually fire a transition in `state`, with guards evaluated?
+(defn event-enabled?
+  "Would the event map fire a transition in `state`, with guards evaluated?
   Uses the library's own transition selection (impl/select-one-tx), so the
   answer matches `fsm/transition`. Guards must be pure for this to be safe."
+  [machine state event]
+  (->> (impl/_state->configuration machine (:_state state))
+       (filter #(= :atomic (:type %)))
+       (some #(second (impl/select-one-tx machine % state event event)))
+       boolean))
+
+(defn enabled?
+  "Would `action` actually fire a transition in `state`? See `event-enabled?`."
   [machine state action]
-  (let [event (action->event action)]
-    (->> (impl/_state->configuration machine (:_state state))
-         (filter #(= :atomic (:type %)))
-         (some #(second (impl/select-one-tx machine % state event event)))
-         boolean)))
+  (event-enabled? machine state (action->event action)))
 
 (defn- dom-get [obj k]
   (when obj
@@ -475,6 +479,7 @@
   (str (if (= severity :error) "FAIL " "WARN ")
        (subs (str problem) 1)
        (when fixture (str " · fixture " fixture))
+       (when-let [i (:instance p)] (str " · " (pr-str i)))
        (when tag (str " · <" (name tag) ">"))
        (when event (str " · " event))
        (when state-path (str " · " state-path))

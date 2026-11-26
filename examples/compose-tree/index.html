@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Composed statecharts demo</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 30px auto; padding: 0 16px; }
+    .bar button { margin-right: 6px; } .status { color: #666; margin-left: 8px; }
+    .row { display: grid; grid-template-columns: 2em 1fr 6em 8em; padding: 2px 0; border-bottom: 1px solid #eee; }
+    .row .detail { grid-column: 2 / -1; color: #666; font-size: 13px; }
+    .caret { border: none; background: none; cursor: pointer; } .amt, .usd { text-align: right; }
+    button[disabled] { opacity: .4; } .error { color: #b42318; }
+  </style>
+  <!-- serve the REPO ROOT: python3 -m http.server 8741 --bind 127.0.0.1
+       open http://127.0.0.1:8741/examples/compose-tree/?n=300   (&fail=prices to see retry) -->
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.8.33/dist/scittle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.8.33/dist/scittle.replicant.js"></script>
+  <script type="application/x-scittle" src="/dist/statecharts-bundle.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/integrations/replicant.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/compose.cljc"></script>
+  <script type="application/x-scittle" src="src/tree/system.cljc"></script>
+  <script type="application/x-scittle" src="src/tree/views.cljc"></script>
+  <script type="application/x-scittle" src="src/tree/main.cljs"></script>
+</head>
+<body><div id="app"></div></body>
+</html>
