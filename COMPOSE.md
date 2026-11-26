@@ -221,7 +221,7 @@ warnings. Pages load the component files as separate scripts after
   guard on reopen, a choice that keeps a value no longer offered). In the
   browser: the compose-tree smoke test (request, disclosure as `:row`); ~~choice
   and form-field are only loaded and simulated in Scittle, not on a page yet.~~
-  the compose-form smoke test (choice, form-field, request; 14 checks, including
+  the compose-form smoke test (choice, form-field, request; 15 checks, including
   editing while an order is in flight). Its `c/check` is clean under bb, the JVM
   and nbb.
 - **`compose.cljc` isn't in `dist/statecharts-bundle.cljc`;** pages load it as a

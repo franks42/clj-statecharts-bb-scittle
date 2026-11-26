@@ -42,7 +42,10 @@ check('order in flight: button shows Ordering…', (await page.$eval('.order', e
 await size(page, 'XL');      // edit while in flight: outputs are handled at the root
 check('choice still usable while the order is in flight', (await status(page)).includes('size XL'));
 await page.waitForSelector('.done', { timeout: 5000 });
-check('order placed with the values at submit time', (await page.$eval('.done', e => e.innerText)) === 'Order 42: size M for me@example.org');
+check('order placed with the values at submit time', (await page.$eval('.done', e => e.innerText)).startsWith('Order 42: size M for me@example.org'));
+await page.click('.new-order');
+check('New order: back to editing, receipt gone, values kept, Order enabled',
+  (await status(page)) === ':editing · size XL · me@example.org' && (await page.$('.done')) === null && !(await disabled(page, '.order')));
 await page.close();
 
 // clearing

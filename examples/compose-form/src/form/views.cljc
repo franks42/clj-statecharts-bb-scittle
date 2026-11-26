@@ -31,4 +31,5 @@
      (c/button vc {:class "order"} [:order] (if (sr/in? app :submitting) "Ordering…" "Order"))
      (when-let [err (:error app)] [:p.error.order-error "Order failed: " err])
      (when-let [{:keys [id size email]} (:order app)]
-       [:p.done (str "Order " id ": size " size " for " email)])]))
+       [:p.done (str "Order " id ": size " size " for " email " ")
+        (c/button vc {:class "new-order"} [:new-order] "New order")])]))

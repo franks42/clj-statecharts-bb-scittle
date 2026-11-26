@@ -48,7 +48,9 @@
                                        :actions (fsm/assign (fn [s e] (assoc s :order (:data e))))}
                         :order/failed {:target :editing
                                        :actions (fsm/assign (fn [s e] (assoc s :error (:data e))))}}}
-      :done       {}}}))
+      ;; size and email stay filled in, so ordering again is one click
+      :done       {:on {:new-order {:target :editing
+                                    :actions (fsm/assign (fn [s _] (assoc s :order nil)))}}}}}))
 
 (def system
   (c/system {:app app
@@ -65,7 +67,7 @@
                (let [n (atom 0)] (fn [& args] (if (= 1 (swap! n inc)) [:request/failed fail] (apply ok-result args)))))]
     {:order    {:actions [[:size/select :main "M"] [:email/input :main "me"]
                           [:email/input :main "me@example.org"] [:size/clear :main]
-                          [:size/select :main "L"] [:order]]
+                          [:size/select :main "L"] [:order] [:new-order] [:order]]
                 :effects fx}
      :reset    {:actions [[:email/input :main "me@example.org"] [:email/reset :main]] :effects fx}
      :sizes-down {:actions [[:retry]]
