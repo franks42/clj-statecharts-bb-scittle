@@ -7,6 +7,8 @@ document adds composition.
 
 Worked example: `examples/compose-tree/`. It has three requests, a join on two of
 them, a late third request, retry, and a tree of 300 to 3,000 lazy row disclosures.
+`examples/compose-form/` is built from library types only: a size choice whose
+options load through a request, an email form-field, and an order request.
 
 ## Concepts
 
@@ -217,8 +219,11 @@ warnings. Pages load the component files as separate scripts after
   under bb, SCI, the JVM and nbb; each type's `c/check` is clean. The tests were
   mutation-checked (e.g. field outputs handled only in `:editing`, no dedupe
   guard on reopen, a choice that keeps a value no longer offered). In the
-  browser: the compose-tree smoke test (request, disclosure as `:row`); choice
-  and form-field are only loaded and simulated in Scittle, not on a page yet.
+  browser: the compose-tree smoke test (request, disclosure as `:row`); ~~choice
+  and form-field are only loaded and simulated in Scittle, not on a page yet.~~
+  the compose-form smoke test (choice, form-field, request; 14 checks, including
+  editing while an order is in flight). Its `c/check` is clean under bb, the JVM
+  and nbb.
 - **`compose.cljc` isn't in `dist/statecharts-bundle.cljc`;** pages load it as a
   separate script.
 - **Delayed transitions (`:after`) aren't supported** in composed instances (no
