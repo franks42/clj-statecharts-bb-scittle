@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Statecharts + Replicant checkout</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    .seats button { margin: 4px; min-width: 3.5em; }
+    .seats button.chosen { background: #2e7d32; color: white; }
+    .actions button { margin-right: 8px; }
+    button[disabled] { opacity: .45; }
+    .error { color: #c62828; }
+  </style>
+  <!-- Serve the REPO ROOT on 127.0.0.1, e.g.
+       python3 -m http.server 8741 --bind 127.0.0.1
+       then open http://127.0.0.1:8741/examples/replicant-checkout/ -->
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.8.33/dist/scittle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/scittle@0.8.33/dist/scittle.replicant.js"></script>
+  <script type="application/x-scittle" src="/dist/statecharts-bundle.cljc"></script>
+  <script type="application/x-scittle" src="/src/statecharts/integrations/replicant.cljc"></script>
+  <script type="application/x-scittle" src="src/checkout/chart.cljc"></script>
+  <script type="application/x-scittle" src="src/checkout/views.cljc"></script>
+  <script type="application/x-scittle" src="src/checkout/main.cljs"></script>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>
