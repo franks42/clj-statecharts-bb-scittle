@@ -143,9 +143,11 @@ the many instances that share an initial state. Not done yet.
 
 ## Status and limits
 
-- **Tested:** nbb (26 tests, 106 assertions, across compose, the Replicant helper and
-  the checkout template) and headless Chrome with Scittle 0.8.33 + Replicant (both
-  examples). **bb and the JVM are not run yet.**
+- **Tested:** 26 tests, 106 assertions (across compose, the Replicant helper and
+  the checkout template) under nbb, bb, SCI (`scripts/test-sci.bb`) and the JVM,
+  plus `checkout.verify` and the compose-tree `c/check` under bb and the JVM; and
+  headless Chrome with Scittle 0.8.33 + Replicant (both examples).
+  `scripts/test-bb.sh` and `scripts/test-sci.bb` include these tests.
 - **`compose.cljc` isn't in `dist/statecharts-bundle.cljc`;** pages load it as a
   separate script.
 - **Delayed transitions (`:after`) aren't supported** in composed instances (no
