@@ -57,6 +57,10 @@
    "src/statecharts/core.cljc"
    "src/statecharts/integrations/replicant.cljc"
    "src/statecharts/compose.cljc"
+   "src/statecharts/components/request.cljc"
+   "src/statecharts/components/disclosure.cljc"
+   "src/statecharts/components/choice.cljc"
+   "src/statecharts/components/form_field.cljc"
    "examples/replicant-checkout/src/checkout/chart.cljc"])
 
 (println "--- Loading source files through SCI eval-string* ---")
@@ -81,6 +85,10 @@
    "test/statecharts/service_test.cljc"
    "test/statecharts/integrations/replicant_test.cljc"
    "test/statecharts/compose_test.cljc"
+   "test/statecharts/components/request_test.cljc"
+   "test/statecharts/components/disclosure_test.cljc"
+   "test/statecharts/components/choice_test.cljc"
+   "test/statecharts/components/form_field_test.cljc"
    "examples/replicant-checkout/test/checkout/chart_test.cljc"])
 
 (doseq [f test-files]
@@ -100,6 +108,10 @@
                            'statecharts.service-test
                            'statecharts.integrations.replicant-test
                            'statecharts.compose-test
+                           'statecharts.components.request-test
+                           'statecharts.components.disclosure-test
+                           'statecharts.components.choice-test
+                           'statecharts.components.form-field-test
                            'checkout.chart-test)")]
   (println "")
   (let [failures (+ (:fail result) (:error result))]
