@@ -45,6 +45,7 @@
 
   Everything except `make-app`/`dispatch!`/`start!` is pure, so the whole system
   runs under bb, nbb and the JVM with fake effects via `simulate`."
+  (:refer-clojure :exclude [send descendants deliver])
   (:require [statecharts.core :as fsm]
             [statecharts.integrations.replicant :as sr]))
 
@@ -420,10 +421,10 @@
         s (state vc to)
         m (machine-of (:sys vc) to)]
     (boolean
-     (and s m
-          (if (sr/has-placeholders? action)
-            (contains? (sr/accepted-events m s) (:type event))
-            (sr/event-enabled? m s event))))))
+      (and s m
+           (if (sr/has-placeholders? action)
+             (contains? (sr/accepted-events m s) (:type event))
+             (sr/event-enabled? m s event))))))
 
 (defn on
   "Like sr/on, for app or instance actions."
@@ -502,17 +503,17 @@
                   [{:severity :error :problem :scenario/threw :message (ex-message e)
                     :fix "see the message; a message loop or a throwing chart action"}]
                   (concat
-                   (remove #(= :info (:severity %)) (:problems r))
-                   (when view
-                     (for [w (:worlds r)
-                           :let [vc (view-ctx system w)
-                                 rendered (try {:ok (view vc)}
-                                               (catch #?(:clj Throwable :cljs :default) e {:error e}))]
-                           p (if-let [e (:error rendered)]
-                               [{:severity :error :problem :view/threw :message (ex-message e)
-                                 :fix "make the view handle this world"}]
-                               (control-problems system vc (:ok rendered)))]
-                       p))))]
+                    (remove #(= :info (:severity %)) (:problems r))
+                    (when view
+                      (for [w (:worlds r)
+                            :let [vc (view-ctx system w)
+                                  rendered (try {:ok (view vc)}
+                                                (catch #?(:clj Throwable :cljs :default) e {:error e}))]
+                            p (if-let [e (:error rendered)]
+                                [{:severity :error :problem :view/threw :message (ex-message e)
+                                  :fix "make the view handle this world"}]
+                                (control-problems system vc (:ok rendered)))]
+                        p))))]
           (assoc p :fixture sname))
         ok-runs (remove (comp :threw second) runs)
         reached (into #{} (mapcat (comp :reached second)) ok-runs)
@@ -521,25 +522,25 @@
         app-reached (seen-by :app)
         coverage
         (concat
-         (for [p (sort-by str (sr/leaf-paths (:app system)))
-               :when (not (contains? app-reached p))]
-           {:severity :warn :problem :state/never-reached :instance :app :state-path p
-            :fix "add a scenario that reaches this state"})
-         (for [[t {:keys [machine outputs]}] (sort-by key (:types system))
-               :let [seen (seen-by t)]
-               p (concat
-                  (when (seq seen)
-                    (for [lp (sort-by str (sr/leaf-paths machine))
-                          :when (not (contains? seen lp))]
-                      {:severity :warn :problem :state/never-reached :instance t :state-path lp
-                       :fix "add a scenario that drives an instance of this type there"}))
-                  (when (empty? seen)
-                    [{:severity :warn :problem :type/never-used :instance t
-                      :fix "no scenario creates an instance of this type"}])
-                  (for [o (sort outputs) :when (not (contains? emitted o))]
-                    {:severity :warn :problem :output/never-emitted :instance t :event o
-                     :fix "add a scenario where this output happens"}))]
-           p))]
+          (for [p (sort-by str (sr/leaf-paths (:app system)))
+                :when (not (contains? app-reached p))]
+            {:severity :warn :problem :state/never-reached :instance :app :state-path p
+             :fix "add a scenario that reaches this state"})
+          (for [[t {:keys [machine outputs]}] (sort-by key (:types system))
+                :let [seen (seen-by t)]
+                p (concat
+                    (when (seq seen)
+                      (for [lp (sort-by str (sr/leaf-paths machine))
+                            :when (not (contains? seen lp))]
+                        {:severity :warn :problem :state/never-reached :instance t :state-path lp
+                         :fix "add a scenario that drives an instance of this type there"}))
+                    (when (empty? seen)
+                      [{:severity :warn :problem :type/never-used :instance t
+                        :fix "no scenario creates an instance of this type"}])
+                    (for [o (sort outputs) :when (not (contains? emitted o))]
+                      {:severity :warn :problem :output/never-emitted :instance t :event o
+                       :fix "add a scenario where this output happens"}))]
+            p))]
     (->> (concat per-scenario coverage)
          distinct
          (sort-by #(if (= :error (:severity %)) 0 1))
