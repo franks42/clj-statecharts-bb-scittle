@@ -141,6 +141,71 @@ the many instances that share an initial state. Not done yet.
 - **Give each type its own tests** with `c/simulate` (pure), plus one
   `c/check` for the whole system, with automatic *and* manual scenarios.
 
+## Component library
+
+Four ready-made types live in `src/statecharts/components/`. Each namespace has a
+`component` factory. Its `:type` option sets the type and therefore the event
+namespace: `(disclosure/component {:type :row})` accepts `:row/toggle`. Two
+instances of a type in one system share the type; two *kinds* (say rows and
+panels) need two types.
+
+| Type         | Factory                                             | States                    | Events (accepted)              | Outputs                       |
+| ------------ | --------------------------------------------------- | ------------------------- | ------------------------------ | ----------------------------- |
+| `request`    | `(request/component)`                               | idle, loading, ok, failed | `start`, `succeeded`, `failed` | `ok` (data), `failed` (error) |
+| `disclosure` | `(disclosure/component {:lazy? true})`              | closed, open              | `toggle`, `open`, `close`      | `opened`, `closed`            |
+| `choice`     | `(choice/component)`                                | unset, set                | `select`, `clear`, `options`   | `changed` (value or nil)      |
+| `form-field` | `(form-field/component {:type :email :validate f})` | pristine, valid, invalid  | `input`, `reset`               | `valid`, `invalid`, `cleared` |
+
+### request
+
+Spawn with `{:params {:effect :fetch/x :args [...]}}`, then send `start`. Entering
+`loading` queues `[effect & args]`; the handler replies `succeeded` or `failed`.
+`start` is not accepted while loading, so its control disables itself and a
+parent's send is reported as `send-rejected`. To abandon a request, kill or
+replace the instance; its reply is then dropped.
+
+Manual scenarios in `test/statecharts/components/request_test.cljc`: cancel while
+loading (reply dropped as `:late-reply`), and cancel then load again (the old
+reply is a `:stale-reply`, the new one lands).
+
+### disclosure
+
+Lazy by default, as in the compose-tree demo (`{:type :row}`): unused instances
+cost nothing, but their outputs go nowhere. To react to opening, use
+`{:lazy? false}` and spawn with an `:on` mapping.
+
+Manual scenario in `disclosure_test.cljc`: details load on first open; the user
+closes and reopens while they're in flight. The parent records which keys it has
+requested, so the request starts once. Without that guard the test sees two
+fetches.
+
+### choice
+
+Options are plain values (ids); labels belong to the view. `select` is guarded:
+the value must be offered and differ from the current one. `options` replaces
+the list; if the current value is no longer offered, the choice clears itself and
+emits `changed` with nil.
+
+Manual scenario in `choice_test.cljc`: the user picks a size while the options
+reload, and the new options no longer contain it. The choice clears and the
+parent hears about it.
+
+### form-field
+
+A factory: one type per validation rule. `validate` is a pure fn of the value
+that returns nil or an error message. It runs as a guard, so no I/O; a server-side
+check belongs in a request the parent starts on `valid`.
+
+Manual scenarios in `form_field_test.cljc`: the user edits the field while the
+signup request is in flight, with the request succeeding and failing. The parent
+must take field outputs in every state (here at the root `:on`); handling them
+only in `:editing` loses them, which `c/check` reports as `output-rejected`.
+
+Every type has its own test file with `c/simulate` tests, a small host app, and
+a `c/check` over automatic and manual scenarios that reports no errors and no
+warnings. Pages load the component files as separate scripts after
+`compose.cljc`, as `examples/compose-tree/index.html` does.
+
 ## Status and limits
 
 - **Tested:** 26 tests, 106 assertions (across compose, the Replicant helper and
@@ -148,11 +213,19 @@ the many instances that share an initial state. Not done yet.
   plus `checkout.verify` and the compose-tree `c/check` under bb and the JVM; and
   headless Chrome with Scittle 0.8.33 + Replicant (both examples).
   `scripts/test-bb.sh` and `scripts/test-sci.bb` include these tests.
+- **Component library tested:** 20 tests, 88 assertions across the four types,
+  under bb, SCI, the JVM and nbb; each type's `c/check` is clean. The tests were
+  mutation-checked (e.g. field outputs handled only in `:editing`, no dedupe
+  guard on reopen, a choice that keeps a value no longer offered). In the
+  browser: the compose-tree smoke test (request, disclosure as `:row`); choice
+  and form-field are only loaded and simulated in Scittle, not on a page yet.
 - **`compose.cljc` isn't in `dist/statecharts-bundle.cljc`;** pages load it as a
   separate script.
 - **Delayed transitions (`:after`) aren't supported** in composed instances (no
   scheduler).
 - **Manual scenarios are hand-written.** Nothing yet explores all interleavings
   automatically.
-- **Not built yet:** the component library (request, disclosure, choice, form,
-  list editor). The demo defines its own `request` and `row`.
+- ~~**Not built yet:** the component library (request, disclosure, choice, form,
+  list editor). The demo defines its own `request` and `row`.~~ Built: request,
+  disclosure, choice, form-field (see Component library); the demo uses them.
+- **Not built yet:** the list editor type, and view helpers for the library types.
