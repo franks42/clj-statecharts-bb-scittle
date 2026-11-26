@@ -62,7 +62,7 @@
       ;; retry only what failed: a request still in flight can't be restarted
       :failed  {:on {:retry {:target :loading
                              :actions [(c/send-each (fn [s _] (for [k (:failed s)] [[:request k] [:request/start]])))
-                                       (fsm/assign #(assoc % :failed #{}))]}
+                                       (fsm/assign (fn [s _] (assoc s :failed #{})))]}
                      :load/failed {:actions (note-failed)}
                      :holdings/loaded {:actions (got :holdings)}
                      :prices/loaded {:actions (got :prices)}

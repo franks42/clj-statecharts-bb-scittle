@@ -86,7 +86,7 @@
                      {:actions (fsm/assign (fn [s e] (assoc s :b (:data e))))}]
             :a/failed :error}}
       :ready {:on {:reload {:target :loading
-                            :actions [(fsm/assign #(assoc %1 :a nil :b nil))
+                            :actions [(fsm/assign (fn [s _] (assoc s :a nil :b nil)))
                                       (c/kill [:req :a])
                                       (c/spawn [:req :a] {:params {:effect :fetch :args ["a2"]}
                                                           :on {:req/ok :a/done}})
